@@ -1,0 +1,10 @@
+[package]
+name = "gmmk-pro-brightness-knob"
+version = "0.1.0"
+authors = ["andycodesstuff"]
+edition = "2021"
+description = "Make your Glorious GMMK PRO keyboard's knob adjust the brightness of your display"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
