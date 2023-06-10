@@ -46,7 +46,7 @@ fn main() {
     // Unwrap the actual hook ID once we handled the error case
     let hook_id = hook_res.unwrap();
 
-    // Register a Ctrl-C handler to signal where to stop listening for mouse input events
+    // Register a Ctrl-C handler to signal when to stop listening for mouse input events
     let handler_res = ctrlc::set_handler(move || {
       println!("INFO: received Ctrl-C, exiting the program...");
 
