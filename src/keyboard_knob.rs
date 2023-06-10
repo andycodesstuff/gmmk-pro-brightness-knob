@@ -36,7 +36,7 @@ unsafe fn emulate_knob_with_mousewheel() {
 
   // Register a Ctrl-C handler to signal when to stop listening for mouse input events
   let handler_res = ctrlc::set_handler(move || {
-    println!("INFO: received Ctrl-C, exiting the program...");
+    println!("INFO: received Ctrl-C, stopping the hook...");
 
     // Send the WM_QUIT message to the main thread so that GetMessageW can return and exit the program gracefully
     // Note: PostQuitMessage won't work here because we are on a different thread!
