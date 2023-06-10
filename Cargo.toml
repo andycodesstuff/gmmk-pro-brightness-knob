@@ -8,3 +8,5 @@ description = "Make your Glorious GMMK PRO keyboard's knob adjust the brightness
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
+ctrlc = "3.4.0"
+windows = { version = "0.48", features = ["Win32_Foundation", "Win32_System_Threading", "Win32_UI_WindowsAndMessaging"] }
