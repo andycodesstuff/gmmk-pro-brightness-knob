@@ -1,8 +1,9 @@
 use ctrlc;
+use std::sync::mpsc::{Sender, SendError};
 use windows::Win32::Foundation::{HMODULE, HWND, LPARAM, LRESULT, WPARAM};
 use windows::Win32::System::Threading::GetCurrentThreadId;
 use windows::Win32::UI::WindowsAndMessaging::{
-  CallNextHookEx, DispatchMessageW, GetMessageW, PostThreadMessageW, SetWindowsHookExW, TranslateMessage, UnhookWindowsHookEx,
+  CallNextHookEx, DispatchMessageW, GetMessageW, PostMessageW, PostThreadMessageW, SetWindowsHookExW, TranslateMessage, UnhookWindowsHookEx,
   HHOOK, MSG, MSLLHOOKSTRUCT, WINDOWS_HOOK_ID, WM_QUIT
 };
 
@@ -10,29 +11,40 @@ const HC_ACTION: i32 = 0;
 const WH_MOUSE_LL: WINDOWS_HOOK_ID = WINDOWS_HOOK_ID(14);
 const WM_MOUSEWHEEL: WPARAM = WPARAM(522usize);
 
+/// Represent a knob adjustment event. The values chosen for the enum items are not random, and were chosen according
+/// to Microsoft's documentation on application-defined messages
+/// 
+/// Reference: https://learn.microsoft.com/en-us/windows/win32/winmsg/about-messages-and-message-queues#application-defined-messages
+#[repr(u32)]
+pub enum KnobAdjustmentEvent {
+  Increment = 0x0500,
+  Decrement = 0x0502
+}
+
 /// Register the event handler for adjustments to the knob. These adjustments can come either from the physical keyboard
 /// device, or emulated using the vertical mouse scroll wheel
-pub fn register_knob_adjustment_handler(emulate_knob: Option<bool>) {
+pub fn register_knob_adjustment_handler(channel_tx: Sender<KnobAdjustmentEvent>, emulate_knob: Option<bool>) {
   if emulate_knob.is_some() {
-    unsafe { emulate_knob_with_mousewheel(); }
+    unsafe {
+      emulate_knob_with_mousewheel(channel_tx).unwrap_or_else(|err| {
+        match err {
+          HandlerError::HookError(e) => eprintln!("ERROR: failed to register a hook for low-level mouse input events - code: {}", e),
+          HandlerError::StopHandlerError(e) => eprintln!("ERROR: failed to register Ctrl-C handler - code: {}", e),
+          HandlerError::TXError(_) => eprintln!("ERROR: unable to forward knob adjustment events to the other threads")
+        };
+      });
+    }
   } else {
     todo!("detect keyboard knob adjustments")
   }
 }
 
 /// Emulate the keyboard knob using the vertical mouse scroll wheel
-unsafe fn emulate_knob_with_mousewheel() {
+unsafe fn emulate_knob_with_mousewheel(channel_tx: Sender<KnobAdjustmentEvent>) -> Result<(), HandlerError> {
   let thread_id = GetCurrentThreadId();
 
   // Register a hook for capturing low-level mouse input events
-  let hook_res = SetWindowsHookExW(WH_MOUSE_LL, Some(mouse_hook), HMODULE(0), 0);
-  if let Err(hook_err) = hook_res {
-    println!("ERROR: failed to register a hook for low-level mouse input events - code: {}", hook_err);
-    return;
-  }
-
-  // Unwrap the actual hook ID once we handled the error case
-  let hook_id = hook_res.unwrap();
+  let hook_id = SetWindowsHookExW(WH_MOUSE_LL, Some(mouse_hook), HMODULE(0), 0)?;
 
   // Register a Ctrl-C handler to signal when to stop listening for mouse input events
   let handler_res = ctrlc::set_handler(move || {
@@ -43,20 +55,28 @@ unsafe fn emulate_knob_with_mousewheel() {
     PostThreadMessageW(thread_id, WM_QUIT, WPARAM(0), LPARAM(0));
   });
   if let Err(handler_err) = handler_res {
-    println!("ERROR: failed to register Ctrl-C handler - code: {}", handler_err);
-
     UnhookWindowsHookEx(hook_id);
-    return;
+    return Err(HandlerError::StopHandlerError(handler_err));
   }
 
   // Listen to mouse input events
   let mut msg: MSG = Default::default();
   while GetMessageW(&mut msg, HWND(0), 0, 0).as_bool() {
     TranslateMessage(&msg);
+
+    // Forward the knob adjustment events to the other thread(s)
+    let evt = msg.message;
+    match evt {
+      evt if evt == KnobAdjustmentEvent::Increment as u32 => channel_tx.send(KnobAdjustmentEvent::Increment)?,
+      evt if evt == KnobAdjustmentEvent::Decrement as u32 => channel_tx.send(KnobAdjustmentEvent::Decrement)?,
+      _ => {}
+    };
+
     DispatchMessageW(&msg);
   }
 
   UnhookWindowsHookEx(hook_id);
+  Ok(())
 }
 
 /// Handle low-level mouse input events
@@ -75,8 +95,29 @@ unsafe extern "system" fn mouse_hook(code: i32, w_param: WPARAM, l_param: LPARAM
     let mouse_event = *(l_param.0 as *const MSLLHOOKSTRUCT);
     let mouse_delta = ((mouse_event.mouseData >> 16) & 0xffff) as u16 as i16;
 
-    println!("mouse delta: {:?} {}", mouse_event, mouse_delta);
+    // Send the parsed mouse event back to the message loop
+    let msg = (if mouse_delta > 0 { KnobAdjustmentEvent::Increment } else { KnobAdjustmentEvent::Decrement }) as u32;
+    PostMessageW(HWND(0), msg, WPARAM(0), LPARAM(0));
   }
 
   CallNextHookEx(HHOOK(0), code, w_param, l_param)
+}
+
+#[derive(Debug)]
+enum HandlerError {
+  HookError(windows::core::Error),
+  StopHandlerError(ctrlc::Error),
+  TXError(SendError<KnobAdjustmentEvent>)
+}
+
+impl From<windows::core::Error> for HandlerError {
+  fn from(value: windows::core::Error) -> Self {
+    HandlerError::HookError(value)
+  }
+}
+
+impl From<SendError<KnobAdjustmentEvent>> for HandlerError {
+  fn from(value: SendError<KnobAdjustmentEvent>) -> Self {
+    HandlerError::TXError(value)
+  }
 }
