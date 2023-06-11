@@ -9,4 +9,5 @@ description = "Make your Glorious GMMK PRO keyboard's knob adjust the brightness
 
 [dependencies]
 ctrlc = "3.4.0"
+keyframe = "1.1.1"
 windows = { version = "0.48", features = ["Win32_Foundation", "Win32_System_Threading", "Win32_UI_WindowsAndMessaging"] }
