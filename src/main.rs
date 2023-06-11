@@ -2,10 +2,10 @@ mod keyboard_knob;
 
 use self::keyboard_knob::{KnobAdjustmentEvent, register_knob_adjustment_handler};
 
+use crossbeam_channel::{Receiver, unbounded};
 use keyframe::{ease, functions::EaseInOutCubic};
 use std::cmp::{max, min};
 use std::hint;
-use std::sync::mpsc;
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -14,36 +14,38 @@ const MIN_BRIGHTNESS: i32 = 0;
 const MAX_BRIGHTNESS: i32 = 100;
 
 fn main() {
-  let (tx, rx) = mpsc::channel::<KnobAdjustmentEvent>();
+  let (s, r) = unbounded::<KnobAdjustmentEvent>();
+  let r_clone = r.clone();
 
   let mut threads = Vec::new();
-  threads.push(thread::spawn(move || { register_knob_adjustment_handler(tx, Some(true)); }));
+  threads.push(thread::spawn(move || { register_knob_adjustment_handler(s, Some(true)); }));
   threads.push(thread::spawn(move || {
-    let mut current_monitor_brightness = 0;
-    let mut prev_brightness = 0;
+    let mut curr_brightness = 0;
     let mut next_brightness = 0;
 
-    for received in rx {
+    for received in r {
       next_brightness = match received {
         KnobAdjustmentEvent::Increment => min(next_brightness + 1, MAX_BRIGHTNESS),
         KnobAdjustmentEvent::Decrement => max(next_brightness - 1, MIN_BRIGHTNESS) 
       };
 
       // Avoid unnecessary calls
-      if next_brightness != prev_brightness {
-        println!("brightness: next {}\tprev {}", next_brightness, prev_brightness);
-        current_monitor_brightness = adjust_brightness(current_monitor_brightness, next_brightness, ANIM_DURATION);
+      if next_brightness != curr_brightness {
+        curr_brightness = match adjust_brightness(&r_clone, curr_brightness, next_brightness, ANIM_DURATION) {
+          Err(_) => curr_brightness,
+          Ok(value) => value
+        };
       }
-
-      prev_brightness = next_brightness;
     }
   }));
 
   for t in threads { t.join().unwrap(); }
 }
 
-/// Adjust the brightness of the monitor by smoothly transitioning from the previous value
-fn adjust_brightness(prev_value: i32, target_value: i32, transition_duration: Duration) -> i32 {
+/// Adjust the brightness of the monitor by smoothly transitioning from the previous value. If a new knob adjustment
+/// event comes through while busy-waiting for the next frame, the transition is interrupted before finishing and the
+/// new event takes priority
+fn adjust_brightness(r: &Receiver<KnobAdjustmentEvent>, prev_value: i32, target_value: i32, transition_duration: Duration) -> Result<i32, Box<dyn std::error::Error>> {
   let from_brightness = prev_value as f64;
   let to_brightness = target_value as f64;
 
@@ -68,10 +70,15 @@ fn adjust_brightness(prev_value: i32, target_value: i32, transition_duration: Du
     // Delays next iteration by a precise time interval
     // Reference: https://stackoverflow.com/a/72837005
     let time = Instant::now();
-    while time.elapsed() < frame_time_ms { hint::spin_loop(); }
+    while time.elapsed() < frame_time_ms {
+      // Interrupt the transition if a new knob adjustment event was registered
+      if !r.is_empty() { return Ok(prev_value); }
+
+      hint::spin_loop();
+    }
 
     prev_brightness = next_brightness;
   }
 
-  target_value
+  Ok(target_value)
 }

@@ -1,5 +1,5 @@
+use crossbeam_channel::Sender;
 use ctrlc;
-use std::sync::mpsc::{Sender, SendError};
 use windows::Win32::Foundation::{HMODULE, HWND, LPARAM, LRESULT, WPARAM};
 use windows::Win32::System::Threading::GetCurrentThreadId;
 use windows::Win32::UI::WindowsAndMessaging::{
@@ -107,7 +107,7 @@ unsafe extern "system" fn mouse_hook(code: i32, w_param: WPARAM, l_param: LPARAM
 enum HandlerError {
   HookError(windows::core::Error),
   StopHandlerError(ctrlc::Error),
-  TXError(SendError<KnobAdjustmentEvent>)
+  TXError(crossbeam_channel::SendError<KnobAdjustmentEvent>)
 }
 
 impl From<windows::core::Error> for HandlerError {
@@ -116,8 +116,8 @@ impl From<windows::core::Error> for HandlerError {
   }
 }
 
-impl From<SendError<KnobAdjustmentEvent>> for HandlerError {
-  fn from(value: SendError<KnobAdjustmentEvent>) -> Self {
+impl From<crossbeam_channel::SendError<KnobAdjustmentEvent>> for HandlerError {
+  fn from(value: crossbeam_channel::SendError<KnobAdjustmentEvent>) -> Self {
     HandlerError::TXError(value)
   }
 }
