@@ -10,5 +10,7 @@ description = "Make your Glorious GMMK PRO keyboard's knob adjust the brightness
 [dependencies]
 crossbeam-channel = "0.5.8"
 ctrlc = "3.4.0"
+ddc = "0.2.2"
+ddc-winapi = "0.2.1"
 keyframe = "1.1.1"
-windows = { version = "0.48", features = ["Win32_Foundation", "Win32_System_Threading", "Win32_UI_WindowsAndMessaging"] }
+windows = { version = "0.48", features = ["Win32_Foundation", "Win32_Graphics_Gdi", "Win32_System_Threading", "Win32_UI_WindowsAndMessaging"] }
