@@ -74,27 +74,29 @@ pub fn register_knob_adjustment_handler(channel_tx: Sender<KnobAdjustmentEvent>,
 /// Note: A WH_KEYBOARD_LL hook stores the input event data in a KBDLLHOOKSTRUCT struct pointed by the LPARAM argument
 /// Reference: https://learn.microsoft.com/en-us/previous-versions/windows/desktop/legacy/ms644985(v=vs.85)#parameters
 unsafe extern "system" fn keyboard_hook(code: i32, w_param: WPARAM, l_param: LPARAM) -> LRESULT {
-  if code == HC_ACTION {
-    // Dereference the pointer to get the keyboard input event data
-    let keyboard_event = *(l_param.0 as *const KBDLLHOOKSTRUCT);
-    let key_code = VIRTUAL_KEY(keyboard_event.vkCode as u16);
-
-    // The identifier of the keyboard message is simply stored in the WPARAM argument
-    let key_state = w_param.0 as u32;
-    let is_key_up = key_state == WM_KEYUP || key_state == WM_SYSKEYUP;
-
-    // Send the parsed keyboard event back to the message loop
-    if is_key_up {
-      if let Some(msg) = match key_code {
-        VK_F19 => Some(KnobAdjustmentEvent::Decrement),
-        VK_F20 => Some(KnobAdjustmentEvent::Increment),
-        _ => None
-      } {
-        PostMessageW(HWND(0), msg as u32, WPARAM(0), LPARAM(0));
-      }
-    }
+  if code != HC_ACTION {
+    return CallNextHookEx(HHOOK(0), code, w_param, l_param);
   }
 
+  // Dereference the pointer to get the keyboard input event data
+  let keyboard_event = *(l_param.0 as *const KBDLLHOOKSTRUCT);
+  let key_code = VIRTUAL_KEY(keyboard_event.vkCode as u16);
+
+  // The identifier of the keyboard message is simply stored in the WPARAM argument
+  let key_state = w_param.0 as u32;
+  let is_key_up = key_state == WM_KEYUP || key_state == WM_SYSKEYUP;
+  if !is_key_up {
+    return CallNextHookEx(HHOOK(0), code, w_param, l_param);
+  }
+
+  // Send the parsed keyboard event back to the message loop
+  if let Some(msg) = match key_code {
+    VK_F19 => Some(KnobAdjustmentEvent::Decrement),
+    VK_F20 => Some(KnobAdjustmentEvent::Increment),
+    _ => None
+  } {
+    PostMessageW(HWND(0), msg as u32, WPARAM(0), LPARAM(0));
+  }
   CallNextHookEx(HHOOK(0), code, w_param, l_param)
 }
 
@@ -103,21 +105,22 @@ unsafe extern "system" fn keyboard_hook(code: i32, w_param: WPARAM, l_param: LPA
 /// Note: A WH_MOUSE_LL hook stores the input event data in a MSLLHOOKSTRUCT struct pointed by the LPARAM argument
 /// Reference: https://stackoverflow.com/a/68827449
 unsafe extern "system" fn mouse_hook(code: i32, w_param: WPARAM, l_param: LPARAM) -> LRESULT {
-  if code == HC_ACTION && w_param == WM_MOUSEWHEEL {
-    // Dereference the pointer to get the mouse input event data, then extract the high-order word (the first 2 bytes)
-    // of the mouseData member to get the mouse delta. After casting it to a short int, a positive value indicates that
-    // the wheel was rotated forward, away from the user; a negative value indicates that the wheel was rotated
-    // backward, towards the user
-    // 
-    // Reference: https://learn.microsoft.com/en-us/windows/win32/api/winuser/ns-winuser-msllhookstruct#members
-    let mouse_event = *(l_param.0 as *const MSLLHOOKSTRUCT);
-    let mouse_delta = ((mouse_event.mouseData >> 16) & 0xffff) as u16 as i16;
-
-    // Send the parsed mouse event back to the message loop
-    let msg = (if mouse_delta > 0 { KnobAdjustmentEvent::Increment } else { KnobAdjustmentEvent::Decrement }) as u32;
-    PostMessageW(HWND(0), msg, WPARAM(0), LPARAM(0));
+  if code != HC_ACTION || w_param != WM_MOUSEWHEEL {
+    return CallNextHookEx(HHOOK(0), code, w_param, l_param);
   }
 
+  // Dereference the pointer to get the mouse input event data, then extract the high-order word (the first 2 bytes)
+  // of the mouseData member to get the mouse delta. After casting it to a short int, a positive value indicates that
+  // the wheel was rotated forward, away from the user; a negative value indicates that the wheel was rotated
+  // backward, towards the user
+  // 
+  // Reference: https://learn.microsoft.com/en-us/windows/win32/api/winuser/ns-winuser-msllhookstruct#members
+  let mouse_event = *(l_param.0 as *const MSLLHOOKSTRUCT);
+  let mouse_delta = ((mouse_event.mouseData >> 16) & 0xffff) as u16 as i16;
+
+  // Send the parsed mouse event back to the message loop
+  let msg = (if mouse_delta > 0 { KnobAdjustmentEvent::Increment } else { KnobAdjustmentEvent::Decrement }) as u32;
+  PostMessageW(HWND(0), msg, WPARAM(0), LPARAM(0));
   CallNextHookEx(HHOOK(0), code, w_param, l_param)
 }
 
