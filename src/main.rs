@@ -1,7 +1,7 @@
 mod keyboard_knob;
 mod monitor;
 
-use self::keyboard_knob::{KnobAdjustmentEvent, register_knob_adjustment_handler};
+use self::keyboard_knob::{HandlerError, KnobAdjustmentEvent, register_knob_adjustment_handler};
 use self::monitor::Monitor;
 
 use crossbeam_channel::{Receiver, unbounded};
@@ -20,7 +20,15 @@ fn main() {
   let r_clone = r.clone();
 
   let mut threads = Vec::new();
-  threads.push(thread::spawn(move || { register_knob_adjustment_handler(s, Some(true)); }));
+  threads.push(thread::spawn(move || {
+    register_knob_adjustment_handler(s, None).unwrap_or_else(|err| {
+      match err {
+        HandlerError::HookError(e) => eprintln!("ERROR: failed to register a hook for low-level mouse input events - code: {}", e),
+        HandlerError::StopHandlerError(e) => eprintln!("ERROR: failed to register Ctrl-C handler - code: {}", e),
+        HandlerError::TXError(_) => eprintln!("ERROR: unable to forward knob adjustment events to the other threads")
+      };
+    });
+  }));
   threads.push(thread::spawn(move || {
     let mut primary_monitor = Monitor::new_primary();
     let mut curr_brightness = primary_monitor.get_brightness() as i32;
