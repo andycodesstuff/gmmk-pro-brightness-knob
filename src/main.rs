@@ -21,7 +21,7 @@ fn main() {
 
   let mut threads = Vec::new();
   threads.push(thread::spawn(move || {
-    register_knob_adjustment_handler(s, None).unwrap_or_else(|err| {
+    register_knob_adjustment_handler(s, false).unwrap_or_else(|err| {
       match err {
         HandlerError::HookError(e) => eprintln!("ERROR: failed to register a hook for low-level mouse input events - code: {}", e),
         HandlerError::StopHandlerError(e) => eprintln!("ERROR: failed to register Ctrl-C handler - code: {}", e),

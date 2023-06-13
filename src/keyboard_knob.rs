@@ -25,14 +25,14 @@ pub enum KnobAdjustmentEvent {
 
 /// Register the event handler for adjustments to the knob. These adjustments can come either from the physical keyboard
 /// device, or emulated using the vertical mouse scroll wheel
-pub fn register_knob_adjustment_handler(channel_tx: Sender<KnobAdjustmentEvent>, emulate_knob: Option<bool>) -> Result<(), HandlerError> {
+pub fn register_knob_adjustment_handler(channel_tx: Sender<KnobAdjustmentEvent>, emulate_knob: bool) -> Result<(), HandlerError> {
   unsafe {
     let thread_id = GetCurrentThreadId();
 
     // Register a hook for capturing low-level input events
     let hook_id = match emulate_knob {
-      Some(_) => SetWindowsHookExW(WH_MOUSE_LL, Some(mouse_hook), HMODULE(0), 0)?,
-      None => SetWindowsHookExW(WH_KEYBOARD_LL, Some(keyboard_hook), HMODULE(0), 0)?
+      true => SetWindowsHookExW(WH_MOUSE_LL, Some(mouse_hook), HMODULE(0), 0)?,
+      false => SetWindowsHookExW(WH_KEYBOARD_LL, Some(keyboard_hook), HMODULE(0), 0)?
     };
 
     // Register a Ctrl-C handler to signal when to stop listening for input events
