@@ -1,6 +1,8 @@
 mod keyboard_knob;
+mod monitor;
 
 use self::keyboard_knob::{KnobAdjustmentEvent, register_knob_adjustment_handler};
+use self::monitor::Monitor;
 
 use crossbeam_channel::{Receiver, unbounded};
 use keyframe::{ease, functions::EaseInOutCubic};
@@ -20,8 +22,9 @@ fn main() {
   let mut threads = Vec::new();
   threads.push(thread::spawn(move || { register_knob_adjustment_handler(s, Some(true)); }));
   threads.push(thread::spawn(move || {
-    let mut curr_brightness = 0;
-    let mut next_brightness = 0;
+    let mut primary_monitor = Monitor::new_primary();
+    let mut curr_brightness = primary_monitor.get_brightness() as i32;
+    let mut next_brightness = curr_brightness;
 
     for received in r {
       next_brightness = match received {
@@ -31,7 +34,7 @@ fn main() {
 
       // Avoid unnecessary calls
       if next_brightness != curr_brightness {
-        curr_brightness = match adjust_brightness(&r_clone, curr_brightness, next_brightness, ANIM_DURATION) {
+        curr_brightness = match adjust_brightness(&mut primary_monitor, &r_clone, curr_brightness, next_brightness, ANIM_DURATION) {
           Err(_) => curr_brightness,
           Ok(value) => value
         };
@@ -45,12 +48,12 @@ fn main() {
 /// Adjust the brightness of the monitor by smoothly transitioning from the previous value. If a new knob adjustment
 /// event comes through while busy-waiting for the next frame, the transition is interrupted before finishing and the
 /// new event takes priority
-fn adjust_brightness(r: &Receiver<KnobAdjustmentEvent>, prev_value: i32, target_value: i32, transition_duration: Duration) -> Result<i32, Box<dyn std::error::Error>> {
+fn adjust_brightness(monitor: &mut Monitor, r: &Receiver<KnobAdjustmentEvent>, prev_value: i32, target_value: i32, transition_duration: Duration) -> Result<i32, Box<dyn std::error::Error>> {
   let from_brightness = prev_value as f64;
   let to_brightness = target_value as f64;
 
   // Compute the number of frames required to smoothly transition to the next brightness value in the given duration
-  let refresh_rate = 165.0;
+  let refresh_rate = monitor.refresh_rate_hz as f32;
   let n_frames = max(((transition_duration.as_millis() as f32 * refresh_rate) / 1000.0).ceil() as i32, 1);
 
   let frame_time_ms = Duration::from_millis(((1.0 / refresh_rate) * 1000.0).floor() as u64);
@@ -65,6 +68,7 @@ fn adjust_brightness(r: &Receiver<KnobAdjustmentEvent>, prev_value: i32, target_
     // Avoid unnecessary updates
     if next_brightness != prev_brightness {
       println!("frame #{}\tvalue {}\tt {}", frame, next_brightness, t);
+      monitor.set_brightness(next_brightness as u16);
     }
 
     // Delays next iteration by a precise time interval
