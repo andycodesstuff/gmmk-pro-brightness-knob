@@ -1,5 +1,5 @@
-use crossbeam_channel::Sender;
-use ctrlc;
+use crossbeam_channel::{Receiver, Sender};
+use std::thread;
 use windows::Win32::Foundation::{HMODULE, HWND, LPARAM, LRESULT, WPARAM};
 use windows::Win32::System::Threading::GetCurrentThreadId;
 use windows::Win32::UI::Input::KeyboardAndMouse::{VIRTUAL_KEY, VK_F19, VK_F20};
@@ -25,7 +25,7 @@ pub enum KnobAdjustmentEvent {
 
 /// Register the event handler for adjustments to the knob. These adjustments can come either from the physical keyboard
 /// device, or emulated using the vertical mouse scroll wheel
-pub fn register_knob_adjustment_handler(events_tx: Sender<KnobAdjustmentEvent>, emulate_knob: bool) -> Result<(), HandlerError> {
+pub fn register_knob_adjustment_handler(stop_rx: Receiver<bool>, events_tx: Sender<KnobAdjustmentEvent>, emulate_knob: bool) -> Result<(), HandlerError> {
   unsafe {
     let thread_id = GetCurrentThreadId();
 
@@ -35,18 +35,15 @@ pub fn register_knob_adjustment_handler(events_tx: Sender<KnobAdjustmentEvent>, 
       false => SetWindowsHookExW(WH_KEYBOARD_LL, Some(keyboard_hook), HMODULE(0), 0)?
     };
 
-    // Register a Ctrl-C handler to signal when to stop listening for input events
-    let handler_res = ctrlc::set_handler(move || {
-      println!("INFO: received Ctrl-C, stopping the input event listener...");
-
-      // Send the WM_QUIT message to the main thread so that GetMessageW can return and exit the program gracefully
-      // Note: PostQuitMessage won't work here because we are on a different thread!
-      PostThreadMessageW(thread_id, WM_QUIT, WPARAM(0), LPARAM(0));
+    // Spawn a new thread that just waits for the stop signal to forward it to the message loop
+    thread::spawn(move || {
+      for _ in stop_rx {
+        // Send the WM_QUIT message to the main thread so that GetMessageW can return and exit the program gracefully
+        // Note: PostQuitMessage won't work here because we are on a different thread!
+        PostThreadMessageW(thread_id, WM_QUIT, WPARAM(0), LPARAM(0));
+        println!("INFO: received stop signal");
+      }
     });
-    if let Err(handler_err) = handler_res {
-      UnhookWindowsHookEx(hook_id);
-      return Err(HandlerError::StopHandlerError(handler_err));
-    }
 
     // Message loop
     let mut msg: MSG = Default::default();
@@ -127,7 +124,6 @@ unsafe extern "system" fn mouse_hook(code: i32, w_param: WPARAM, l_param: LPARAM
 #[derive(Debug)]
 pub enum HandlerError {
   HookError(windows::core::Error),
-  StopHandlerError(ctrlc::Error),
   EventsTXError(crossbeam_channel::SendError<KnobAdjustmentEvent>)
 }
 

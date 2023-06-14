@@ -4,7 +4,8 @@ mod monitor;
 use self::keyboard_knob::{HandlerError, KnobAdjustmentEvent, register_knob_adjustment_handler};
 use self::monitor::Monitor;
 
-use crossbeam_channel::{Receiver, unbounded};
+use crossbeam_channel::{Receiver, bounded, unbounded};
+use ctrlc;
 use keyframe::{ease, functions::EaseInOutCubic};
 use std::cmp::{max, min};
 use std::hint;
@@ -19,12 +20,23 @@ fn main() {
   let (events_tx, events_rx_1) = unbounded::<KnobAdjustmentEvent>();
   let events_rx_2 = events_rx_1.clone();
 
+  // Register a Ctrl-C handler to signal when to stop the other threads
+  let (stop_tx, stop_rx) = bounded::<bool>(1);
+  let ctrlc_handler = move || {
+    println!("INFO: sending stop signal to the other threads...");
+    stop_tx.send(true).unwrap();
+  };
+
+  if let Err(err_code) = ctrlc::set_handler(ctrlc_handler) {
+    eprintln!("ERROR: failed to register Ctrl-C handler, error code {}", err_code);
+    return;
+  }
+
   let mut threads = Vec::new();
   threads.push(thread::spawn(move || {
-    register_knob_adjustment_handler(events_tx, false).unwrap_or_else(|err| {
+    register_knob_adjustment_handler(stop_rx, events_tx, false).unwrap_or_else(|err| {
       match err {
         HandlerError::HookError(e) => eprintln!("ERROR: failed to register a hook for low-level mouse input events - code: {}", e),
-        HandlerError::StopHandlerError(e) => eprintln!("ERROR: failed to register Ctrl-C handler - code: {}", e),
         HandlerError::EventsTXError(_) => eprintln!("ERROR: unable to forward knob adjustment events to the other threads")
       };
     });
