@@ -25,7 +25,7 @@ pub enum KnobAdjustmentEvent {
 
 /// Register the event handler for adjustments to the knob. These adjustments can come either from the physical keyboard
 /// device, or emulated using the vertical mouse scroll wheel
-pub fn register_knob_adjustment_handler(channel_tx: Sender<KnobAdjustmentEvent>, emulate_knob: bool) -> Result<(), HandlerError> {
+pub fn register_knob_adjustment_handler(events_tx: Sender<KnobAdjustmentEvent>, emulate_knob: bool) -> Result<(), HandlerError> {
   unsafe {
     let thread_id = GetCurrentThreadId();
 
@@ -56,8 +56,8 @@ pub fn register_knob_adjustment_handler(channel_tx: Sender<KnobAdjustmentEvent>,
       // Forward the knob adjustment events to the other thread(s)
       let evt = msg.message;
       match evt {
-        evt if evt == KnobAdjustmentEvent::Increment as u32 => channel_tx.send(KnobAdjustmentEvent::Increment)?,
-        evt if evt == KnobAdjustmentEvent::Decrement as u32 => channel_tx.send(KnobAdjustmentEvent::Decrement)?,
+        evt if evt == KnobAdjustmentEvent::Increment as u32 => events_tx.send(KnobAdjustmentEvent::Increment)?,
+        evt if evt == KnobAdjustmentEvent::Decrement as u32 => events_tx.send(KnobAdjustmentEvent::Decrement)?,
         _ => {}
       };
 
@@ -128,7 +128,7 @@ unsafe extern "system" fn mouse_hook(code: i32, w_param: WPARAM, l_param: LPARAM
 pub enum HandlerError {
   HookError(windows::core::Error),
   StopHandlerError(ctrlc::Error),
-  TXError(crossbeam_channel::SendError<KnobAdjustmentEvent>)
+  EventsTXError(crossbeam_channel::SendError<KnobAdjustmentEvent>)
 }
 
 impl From<windows::core::Error> for HandlerError {
@@ -139,6 +139,6 @@ impl From<windows::core::Error> for HandlerError {
 
 impl From<crossbeam_channel::SendError<KnobAdjustmentEvent>> for HandlerError {
   fn from(value: crossbeam_channel::SendError<KnobAdjustmentEvent>) -> Self {
-    HandlerError::TXError(value)
+    HandlerError::EventsTXError(value)
   }
 }

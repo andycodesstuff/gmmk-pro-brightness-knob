@@ -16,16 +16,16 @@ const MIN_BRIGHTNESS: i32 = 0;
 const MAX_BRIGHTNESS: i32 = 100;
 
 fn main() {
-  let (s, r) = unbounded::<KnobAdjustmentEvent>();
-  let r_clone = r.clone();
+  let (events_tx, events_rx_1) = unbounded::<KnobAdjustmentEvent>();
+  let events_rx_2 = events_rx_1.clone();
 
   let mut threads = Vec::new();
   threads.push(thread::spawn(move || {
-    register_knob_adjustment_handler(s, false).unwrap_or_else(|err| {
+    register_knob_adjustment_handler(events_tx, false).unwrap_or_else(|err| {
       match err {
         HandlerError::HookError(e) => eprintln!("ERROR: failed to register a hook for low-level mouse input events - code: {}", e),
         HandlerError::StopHandlerError(e) => eprintln!("ERROR: failed to register Ctrl-C handler - code: {}", e),
-        HandlerError::TXError(_) => eprintln!("ERROR: unable to forward knob adjustment events to the other threads")
+        HandlerError::EventsTXError(_) => eprintln!("ERROR: unable to forward knob adjustment events to the other threads")
       };
     });
   }));
@@ -34,7 +34,7 @@ fn main() {
     let mut curr_brightness = primary_monitor.get_brightness() as i32;
     let mut next_brightness = curr_brightness;
 
-    for received in r {
+    for received in events_rx_1 {
       next_brightness = match received {
         KnobAdjustmentEvent::Increment => min(next_brightness + 1, MAX_BRIGHTNESS),
         KnobAdjustmentEvent::Decrement => max(next_brightness - 1, MIN_BRIGHTNESS) 
@@ -42,7 +42,7 @@ fn main() {
 
       // Avoid unnecessary calls
       if next_brightness != curr_brightness {
-        curr_brightness = match adjust_brightness(&mut primary_monitor, &r_clone, curr_brightness, next_brightness, ANIM_DURATION) {
+        curr_brightness = match adjust_brightness(&mut primary_monitor, &events_rx_2, curr_brightness, next_brightness, ANIM_DURATION) {
           Err(_) => curr_brightness,
           Ok(value) => value
         };
@@ -56,7 +56,7 @@ fn main() {
 /// Adjust the brightness of the monitor by smoothly transitioning from the previous value. If a new knob adjustment
 /// event comes through while busy-waiting for the next frame, the transition is interrupted before finishing and the
 /// new event takes priority
-fn adjust_brightness(monitor: &mut Monitor, r: &Receiver<KnobAdjustmentEvent>, prev_value: i32, target_value: i32, transition_duration: Duration) -> Result<i32, Box<dyn std::error::Error>> {
+fn adjust_brightness(monitor: &mut Monitor, events_rx: &Receiver<KnobAdjustmentEvent>, prev_value: i32, target_value: i32, transition_duration: Duration) -> Result<i32, Box<dyn std::error::Error>> {
   let from_brightness = prev_value as f64;
   let to_brightness = target_value as f64;
 
@@ -84,7 +84,7 @@ fn adjust_brightness(monitor: &mut Monitor, r: &Receiver<KnobAdjustmentEvent>, p
     let time = Instant::now();
     while time.elapsed() < frame_time_ms {
       // Interrupt the transition if a new knob adjustment event was registered
-      if !r.is_empty() { return Ok(prev_value); }
+      if !events_rx.is_empty() { return Ok(prev_value); }
 
       hint::spin_loop();
     }
