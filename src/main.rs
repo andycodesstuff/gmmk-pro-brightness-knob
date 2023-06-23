@@ -12,7 +12,7 @@ use std::hint;
 use std::thread;
 use std::time::{Duration, Instant};
 
-const ANIM_DURATION: Duration = Duration::from_millis(1000);
+const ANIM_DURATION: Duration = Duration::from_millis(0);
 const MIN_BRIGHTNESS: i32 = 0;
 const MAX_BRIGHTNESS: i32 = 100;
 
